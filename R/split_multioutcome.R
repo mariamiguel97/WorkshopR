@@ -1,21 +1,53 @@
-#' Split data into training and test sets using iterative stratification
+#' Split a dataset into training and test sets for multiple binary outcomes
 #'
-#' Splits a dataset into training and test sets while attempting to preserve
-#' the distribution of multiple binary outcome variables across the two sets.
+#' Splits a dataset into training and test sets while attempting to distribute
+#' positive cases across multiple binary outcomes as evenly as possible.
 #'
 #' @param data A data frame containing the dataset to be split.
-#' @param outcomes A character vector containing the names of the binary
-#'   outcome variables to be used for stratification.
-#' @param k An integer specifying the number of folds used for the
-#'   iterative stratification. The default is 10.
+#' @param outcomes A character vector specifying the names of the binary
+#'   outcome variables.
+#' @param k An integer specifying the total number of folds used to construct
+#'   the split. Default is 10.
+#' @param train_folds An integer specifying the number of folds allocated to
+#'   the training set. The remaining folds are allocated to the test set.
+#'   Default is 7.
 #' @param seed An optional integer used to make the random assignment
-#'   reproducible. Defaults to NULL.
+#'   reproducible. Default is NULL.
 #'
-#' @return A list containing two elements:
+#' @return A list containing three elements:
 #' \describe{
-#'   \item{train}{The training dataset.}
-#'   \item{test}{The test dataset.}
+#'   \item{train}{The training set, containing observations assigned to the
+#'   first \code{train_folds} folds.}
+#'   \item{test}{The test set, containing observations assigned to the
+#'   remaining folds.}
+#'   \item{balanced_table}{A summary table showing the number and percentage
+#'   of positive cases for each outcome in the global dataset, training set,
+#'   and test set. The \code{Check} column verifies that the number of
+#'   positive cases in the training and test sets sums to the global total.}
 #' }
+#'
+#' @details
+#' The algorithm is greedy and attempts to simultaneously satisfy:
+#' \enumerate{
+#'   \item fold sizes;
+#'   \item the distribution of positive cases for each outcome;
+#'   \item the distribution of cases with multiple positive outcomes.
+#' }
+#'
+#' The function converts the specified outcome variables to binary numeric
+#' values (0/1) before assigning observations to folds.
+#'
+#' The number of folds allocated to the training set is controlled by
+#' \code{train_folds}, while the remaining folds are used for the test set.
+#' For example, with \code{k = 10} and \code{train_folds = 7}, approximately
+#' 70% of the observations are allocated to the training set and 30% to
+#' the test set.
+#'
+#' The \code{balanced_table} provides a summary of the distribution of
+#' positive cases across the global dataset, training set, and test set.
+#'
+#' Missing values in the outcome variables are not allowed, and all outcomes
+#' must be coded as 0/1.
 #'
 #' @examples
 #' data <- data.frame(
@@ -23,21 +55,31 @@
 #'   outcome2 = rep(c(0, 0, 1, 1), 5)
 #' )
 #'
-#' split <- split_multioutput(
+#' split <- split_multioutcome(
 #'   data = data,
 #'   outcomes = c("outcome1", "outcome2"),
+#'   k = 10,
+#'   train_folds = 7,
 #'   seed = 1234
 #' )
 #'
 #' train_set <- split$train
 #' test_set <- split$test
-#'
+#' balanced_table <- split$balanced_table
 #'
 #' @export
-split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
+split_multioutcome <- function(
+    data,
+    outcomes,
+    k = 10,
+    train_folds = 7,
+    seed = NULL
+) {
 
+  # Extract outcome variables
   labels <- data[, outcomes, drop = FALSE]
 
+  # Convert outcomes to numeric 0/1
   labels[] <- lapply(labels, function(x) {
     if (is.factor(x) || is.ordered(x)) {
       as.numeric(as.character(x))
@@ -51,6 +93,7 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
   num_samples <- nrow(labels)
   num_labels <- ncol(labels)
 
+  # Validate k
   if (k < 2) {
     stop("k must be >= 2.")
   }
@@ -59,18 +102,31 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
     stop("k cannot be greater than the number of observations.")
   }
 
+  # Validate train_folds
+  if (train_folds < 1 || train_folds >= k) {
+    stop("train_folds must be >= 1 and < k.")
+  }
+
+  if (train_folds != as.integer(train_folds)) {
+    stop("train_folds must be an integer.")
+  }
+
+  # Check for missing values
   if (anyNA(labels)) {
     stop("Missing values (NA) are not allowed in the outcomes.")
   }
 
+  # Check that outcomes are binary
   if (!all(labels %in% c(0, 1))) {
     stop("All outcomes must be coded as 0/1.")
   }
 
+  # Set seed
   if (!is.null(seed)) {
     set.seed(seed)
   }
 
+  # Initialise fold assignments
   fold_assignments <- integer(num_samples)
 
   desired_fold_sizes <- rep(num_samples / k, k)
@@ -85,6 +141,7 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
 
   unassigned_samples <- seq_len(num_samples)
 
+  # Assign observations to folds
   while (length(unassigned_samples) > 0) {
 
     remaining_label_sums <- colSums(
@@ -128,7 +185,6 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
       } else {
 
         candidate_folds <- seq_len(k)
-
       }
 
       if (length(candidate_folds) > 1) {
@@ -138,7 +194,6 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
         candidate_folds <- candidate_folds[
           size_demands == max(size_demands)
         ]
-
       }
 
       if (length(candidate_folds) == 1) {
@@ -162,7 +217,6 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
             chosen_fold,
             sample_labels
           ] - 1
-
       }
 
       unassigned_samples <-
@@ -170,12 +224,19 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
     }
   }
 
+  # Check that all observations were assigned
   if (any(fold_assignments == 0)) {
     stop("Some observations were not assigned to a fold.")
   }
 
-  train_index <- which(fold_assignments <= 7)
-  test_index  <- which(fold_assignments > 7)
+  # Split data into training and test sets
+  train_index <- which(
+    fold_assignments <= train_folds
+  )
+
+  test_index <- which(
+    fold_assignments > train_folds
+  )
 
   train_set <- data[
     train_index,
@@ -189,8 +250,52 @@ split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
     drop = FALSE
   ]
 
+  # Count positive cases for each outcome
+  n_global <- sapply(data[outcomes], function(x) {
+    sum(
+      as.numeric(as.character(x)) == 1,
+      na.rm = TRUE
+    )
+  })
+
+  n_tr <- sapply(train_set[outcomes], function(x) {
+    sum(
+      as.numeric(as.character(x)) == 1,
+      na.rm = TRUE
+    )
+  })
+
+  n_te <- sapply(test_set[outcomes], function(x) {
+    sum(
+      as.numeric(as.character(x)) == 1,
+      na.rm = TRUE
+    )
+  })
+
+  # Create balanced table
+  balanced_table <- dplyr::tibble(
+    Outcome = outcomes,
+    Global_N = n_global,
+    Train_N = n_tr,
+    Train_Pct = round(
+      (n_tr / n_global) * 100,
+      2
+    ),
+    Test_N = n_te,
+    Test_Pct = round(
+      (n_te / n_global) * 100,
+      2
+    )
+  )
+
+  balanced_table$Check <-
+    balanced_table$Train_N +
+    balanced_table$Test_N ==
+    balanced_table$Global_N
+
   return(list(
     train = train_set,
-    test = test_set
+    test = test_set,
+    balanced_table = balanced_table
   ))
 }

@@ -74,47 +74,62 @@ outcomes <- c(
   "diabetes"
 )
 
-test_that("split_multioutput returns valid train and test sets", {
+test_that("split_multioutcome returns valid train, test, and balanced table", {
 
-  result <- split_multioutput(
+  result <- split_multioutcome(
     data = synthetic_data,
     outcomes = outcomes,
     k = 10,
+    train_folds = 7,
     seed = 1234
   )
 
   # Check output structure
+
   expect_type(result, "list")
   expect_named(
     result,
-    c("train", "test")
+    c("train", "test", "balanced_table")
   )
 
-  # Check that train and test contain all observations
+  # Check total number of observations
+
   expect_equal(
     nrow(result$train) + nrow(result$test),
     nrow(synthetic_data)
   )
 
-  # Check expected 70/30 split
-  expect_equal(
-    nrow(result$train),
-    560
-  )
+  # Check train/test split
 
-  expect_equal(
-    nrow(result$test),
-    240
-  )
+  expect_equal(nrow(result$train), 560)
+  expect_equal(nrow(result$test), 240)
 
   # Check that all variables are retained
+
+  expect_equal(names(result$train), names(synthetic_data))
+  expect_equal(names(result$test), names(synthetic_data))
+
+  # Check balanced table
+
   expect_equal(
-    names(result$train),
-    names(synthetic_data)
+    result$balanced_table$Outcome,
+    outcomes
   )
 
   expect_equal(
-    names(result$test),
-    names(synthetic_data)
+    result$balanced_table$Global_N,
+    sapply(synthetic_data[outcomes], function(x) sum(x == 1))
+  )
+
+  expect_equal(
+    result$balanced_table$Train_N +
+      result$balanced_table$Test_N,
+    result$balanced_table$Global_N
+  )
+
+  # Check that the balance verification is TRUE
+
+  expect_true(
+    all(result$balanced_table$Check)
   )
 })
