@@ -1,3 +1,39 @@
+#' Split data into training and test sets using iterative stratification
+#'
+#' Splits a dataset into training and test sets while attempting to preserve
+#' the distribution of multiple binary outcome variables across the two sets.
+#'
+#' @param data A data frame containing the dataset to be split.
+#' @param outcomes A character vector containing the names of the binary
+#'   outcome variables to be used for stratification.
+#' @param k An integer specifying the number of folds used for the
+#'   iterative stratification. The default is 10.
+#' @param seed An optional integer used to make the random assignment
+#'   reproducible. Defaults to NULL.
+#'
+#' @return A list containing two elements:
+#' \describe{
+#'   \item{train}{The training dataset.}
+#'   \item{test}{The test dataset.}
+#' }
+#'
+#' @examples
+#' data <- data.frame(
+#'   outcome1 = rep(c(0, 1), 10),
+#'   outcome2 = rep(c(0, 0, 1, 1), 5)
+#' )
+#'
+#' split <- split_multioutput(
+#'   data = data,
+#'   outcomes = c("outcome1", "outcome2"),
+#'   seed = 1234
+#' )
+#'
+#' train_set <- split$train
+#' test_set <- split$test
+#'
+#'
+#' @export
 split_multioutput <- function(data, outcomes, k = 10, seed = NULL) {
 
   labels <- data[, outcomes, drop = FALSE]
